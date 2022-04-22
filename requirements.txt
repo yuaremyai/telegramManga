@@ -4,3 +4,4 @@ fake-useragent
 lxml
 opencv-python
 pytelegrambotapi
+numpy
