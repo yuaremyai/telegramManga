@@ -79,6 +79,7 @@ def get_manhva_image_links(page):
     images_blocks = page.find("div", class_="web_pictures").find_all("img")
     for image in images_blocks:
         links.append(image.get("src"))
+    # Rework manhva page getter
     return links
 
 
