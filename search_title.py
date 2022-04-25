@@ -77,14 +77,14 @@ def is_manhva(url):
 def get_manhva_image_links(page):
     links = []
     images_blocks = page.find("div", class_="web_pictures").find_all("img")
+    max_page = len(images_blocks)
     for image in images_blocks:
         links.append(image.get("src"))
-    # Rework manhva page getter
-    return links
+    return links, max_page
 
 
 # Возвращает номер последней страницы
-def get_max_page(page):
+def get_manga_max_page(page):
     topbar = page.find("div", class_="topbar_right")
     max_page = topbar.find("div", class_="text").get_text()
     max_page = max_page.split()[0]
