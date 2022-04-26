@@ -1,6 +1,7 @@
 import telebot
 import image_processing
 import search_title
+import db_control
 import t
 
 
@@ -9,6 +10,7 @@ bot = telebot.TeleBot(token=t.token)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
+    db_control.init_user(message.chat.id)
     bot.send_message(message.chat.id, "Привет! Я Бот для чтения манги\n"
                                       "Чтобы выбрать что почитать используй команду /search название_манги\n"
                                       "Напиши /help чтобы посмотреть список всех команд ")
@@ -19,7 +21,8 @@ def show_commands(message):
     bot.send_message(message.chat.id, "/help - Посмотреть все команды\n"
                                       "/search - Найти мангу по названию или сменить текущую\n"
                                       "/move - Сменить главу\n"
-                                      "/page - Сменить страницу")
+                                      "/page - Сменить страницу\n"
+                                      "/read - Отправляет текущую страницу")
 
 
 @bot.message_handler(commands=['search'])
@@ -58,8 +61,8 @@ def choose_title(message, formated_result):
         bot.send_message(message.chat.id, "Кажеться ты ввёл не число или оно за пределами списка. Попробуй ещё")
         bot.register_next_step_handler(message, choose_title, formated_result)
         return
-    # data base Update user title
-    pass
+    title = list(formated_result.values())[number-1].split("/")[-2]
+    db_control.update_title(message.chat.id, title)
 
 
 def main():
