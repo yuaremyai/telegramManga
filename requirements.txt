@@ -5,3 +5,4 @@ lxml
 opencv-python
 pytelegrambotapi
 numpy
+python-dotenv
