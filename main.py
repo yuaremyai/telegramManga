@@ -13,9 +13,16 @@ db = DataBase()
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     db.init_user(message.chat.id)
+    markup = keyboard()
     bot.send_message(message.chat.id, "Привет! Я Бот для чтения манги\n"
                                       "Чтобы выбрать что почитать используй команду /search название_манги\n"
-                                      "Напиши /help чтобы посмотреть список всех команд ")
+                                      "Напиши /help чтобы посмотреть список всех команд ", reply_markup=markup)
+
+
+def keyboard():
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=False)
+    markup.add("/next", "/read", "/search",  "/move", "/chapter", "/page")
+    return markup
 
 
 @bot.message_handler(commands=['help'])
@@ -118,32 +125,6 @@ def get_next_page(message):
         read_short_image(message.chat.id, url)
 
 
-def get_url(chat_id):
-    title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
-    links = search.get_groups(f"https://read.yagami.me/series/{title}")
-    if not links:
-        bot.send_message(chat_id, "Эта манга пустая. Выбери другую с помощью /search")
-        return
-    volume_links = links[volume]
-    url = volume_links[list(volume_links.keys())[chapter]]
-    return url
-
-
-def update_max_pages(chat_id, url):
-    if search.is_long_images(url):
-        max_page = search.get_long_max_page(url)
-    else:
-        max_page = search.get_small_max_page(url)
-    db.update_column(chat_id, "max_page", max_page)
-
-
-def update_max_values(chat_id):
-    title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
-    links = search.get_groups(f"https://read.yagami.me/series/{title}")
-    db.update_column(chat_id, "max_volume", len(links))
-    db.update_column(chat_id, "max_chapter", len(links[volume]))
-
-
 def read_short_image(chat_id, url):
     page = db.get_column(chat_id, "page")
     img_url = search.get_small_image_link(f"{url}page/{page+1}")
@@ -231,6 +212,32 @@ def confirm_page(message, max_page):
     else:
         db.update_column(message.chat.id, "page", number-1)
         bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
+
+
+def get_url(chat_id):
+    title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
+    links = search.get_groups(f"https://read.yagami.me/series/{title}")
+    if not links:
+        bot.send_message(chat_id, "Эта манга пустая. Выбери другую с помощью /search")
+        return
+    volume_links = links[volume]
+    url = volume_links[list(volume_links.keys())[chapter]]
+    return url
+
+
+def update_max_pages(chat_id, url):
+    if search.is_long_images(url):
+        max_page = search.get_long_max_page(url)
+    else:
+        max_page = search.get_small_max_page(url)
+    db.update_column(chat_id, "max_page", max_page)
+
+
+def update_max_values(chat_id):
+    title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
+    links = search.get_groups(f"https://read.yagami.me/series/{title}")
+    db.update_column(chat_id, "max_volume", len(links))
+    db.update_column(chat_id, "max_chapter", len(links[volume]))
 
 
 def main():
