@@ -49,6 +49,18 @@ class DataBase:
         cursor.close()
         connect.close()
 
+    def update_multi_column(self, chat_id, columns, values):
+        connect = self.connect_to_db()
+        cursor = connect.cursor()
+        set_sql = ""
+        for column in columns:
+            set_sql += f"{column} = ?, "
+        sql = f'''UPDATE user SET {set_sql[:-2]} WHERE id = {chat_id}'''
+        cursor.execute(sql, values)
+        connect.commit()
+        cursor.close()
+        connect.close()
+
     def get_column(self, chat_id, column):
         connect = self.connect_to_db()
         cursor = connect.cursor()

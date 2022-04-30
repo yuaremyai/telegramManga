@@ -50,51 +50,43 @@ def get_manga_title(message):
         bot.register_next_step_handler(sent_msg, get_manga_title)
     else:
         formated_result = search.form_result(search_result)
-        msg = formated_msg(formated_result)
-        sent_msg = bot.send_message(message.chat.id, f"Выбери номер нужной манги\n{msg}")
-        bot.register_next_step_handler(sent_msg, choose_title, formated_result)
+        markup = search_inline_keyboard(formated_result)
+        bot.send_message(message.chat.id, f"Выбери нужную мангу\n", reply_markup=markup)
 
 
-def formated_msg(formated_search_result):
-    msg = ""
-    for i, val in enumerate(formated_search_result.keys(), 1):
-        msg += f"/{i} {val}\n"
-    return msg
+def search_inline_keyboard(formated_search_result):
+    markup = telebot.types.InlineKeyboardMarkup()
+    for key in formated_search_result:
+        link = formated_search_result[key].split("/")[-2]
+        item = telebot.types.InlineKeyboardButton(key, callback_data=link)
+        markup.add(item)
+    return markup
 
 
-def choose_title(message, formated_result):
-    number = message.text.replace("/", "")
-    try:
-        number = int(number)
-        if number > len(formated_result) or number < 1:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "Кажеться ты ввёл не число или оно за пределами списка. Попробуй ещё")
-        bot.register_next_step_handler(message, choose_title, formated_result)
-        return
-    title = list(formated_result.values())[number-1].split("/")[-2]
-    update_title(message.chat.id, title)
-    bot.send_message(message.chat.id, "Отлично! Чтобы начать читать используй /read")
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    update_title(call.message.chat.id, call.data)
+    bot.send_message(call.message.chat.id, "Отлично! Чтобы начать читать используй /read")
 
 
 def update_title(chat_id, title):
-    db.update_column(chat_id, "title", title)
-    db.update_column(chat_id, "volume", 0)
-    db.update_column(chat_id, "chapter", 0)
-    db.update_column(chat_id, "page", 0)
-    url = get_url(chat_id)
+    db.update_multi_column(chat_id, ("title", "volume", "chapter", "page"), (title, 0, 0, 0))
+    update_url(chat_id)
     update_max_values(chat_id)
-    update_max_pages(chat_id, url)
+    update_max_pages(chat_id)
+    url = db.get_column(chat_id, "page_url")
+    is_long = search.is_long_images(url)
+    db.update_column(chat_id, "is_long", is_long)
 
 
 @bot.message_handler(commands=['read'])
 def get_current_page(message):
-    url = get_url(message.chat.id)
     bot.send_message(message.chat.id, "Загружаю страницу")
-    if search.is_long_images(url):
-        read_long_image(message.chat.id, url)
+    is_long = db.get_column(message.chat.id, "is_long")
+    if is_long:
+        read_long_image(message.chat.id)
     else:
-        read_short_image(message.chat.id, url)
+        read_short_image(message.chat.id)
 
 
 @bot.message_handler(commands=['next'])
@@ -103,37 +95,38 @@ def get_next_page(message):
     max_page, chapter, max_chapter, volume, max_volume = db.get_multi_column(message.chat.id, ("max_page", "chapter",
                                                                                    "max_chapter", "volume", "max_volume"))
     if page + 1 > max_page:
-        page = 0
-        chapter += 1
+        db.update_multi_column(message.chat.id, ("page", "chapter"), (0, chapter+1))
+        update_url(message.chat.id)
+        update_max_values(message.chat.id)
+        update_max_pages(message.chat.id)
+    else:
+        db.update_column(message.chat.id, "page", page)
     if chapter + 1 > max_chapter:
-        chapter = 0
-        volume += 1
+        db.update_multi_column(message.chat.id, ("chapter", "volume"), (0, volume+1))
+        update_url(message.chat.id)
+        update_max_values(message.chat.id)
+        update_max_pages(message.chat.id)
     if volume + 1 > max_volume:
         bot.send_message(message.chat.id, "Поздравляю! Ты дочитал до конца\n"
                          "Если хочешь почитатать что-то ещё используй /search")
         return
-    db.update_column(message.chat.id, "page", page)
-    db.update_column(message.chat.id, "chapter", chapter)
-    db.update_column(message.chat.id, "volume", volume)
     bot.send_message(message.chat.id, "Загружаю страницу")
-    url = get_url(message.chat.id)
-    update_max_values(message.chat.id)
-    update_max_pages(message.chat.id, url)
-    if search.is_long_images(url):
-        read_long_image(message.chat.id, url)
+    is_long = db.get_column(message.chat.id, "is_long")
+    if is_long:
+        read_long_image(message.chat.id)
     else:
-        read_short_image(message.chat.id, url)
+        read_short_image(message.chat.id)
 
 
-def read_short_image(chat_id, url):
-    page = db.get_column(chat_id, "page")
+def read_short_image(chat_id):
+    page, url = db.get_multi_column(chat_id, ("page", "page_url"))
     img_url = search.get_small_image_link(f"{url}page/{page+1}")
     image = image_processing.get_image(img_url)
     bot.send_photo(chat_id, photo=image)
 
 
-def read_long_image(chat_id, url):
-    page = db.get_column(chat_id, "page")
+def read_long_image(chat_id):
+    page, url = db.get_multi_column(chat_id, ("page", "page_url"))
     img_url = search.get_long_image_links(url)
     image = image_processing.get_image(img_url[page])
     parts = image_processing.cut_image(image)
@@ -159,18 +152,17 @@ def confirm_volume(message, vol):
         bot.register_next_step_handler(message, confirm_volume, vol)
         return
     else:
-        db.update_column(message.chat.id, "volume", number-1)
-        db.update_column(message.chat.id, "chapter", 0)
-        db.update_column(message.chat.id, "page", 0)
+        db.update_multi_column(message.chat.id, ("page", "chapter", "volume"), (0, 0, number-1))
+        update_url(message.chat.id)
         update_max_values(message.chat.id)
-        update_max_pages(message.chat.id, url=get_url(message.chat.id))
-        bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
+        update_max_pages(message.chat.id)
+        bot.send_message(message.chat.id, "Номер главы успешно изменён")
 
 
 @bot.message_handler(commands=["chapter"])
 def set_chapter(message):
     chapter = db.get_column(message.chat.id, "max_chapter")
-    bot.send_message(message.chat.id, f"Напиши номер тома (сезона) на который хочешь перейти\n"
+    bot.send_message(message.chat.id, f"Напиши номер главы на которую хочешь перейти\n"
                                       f"Последний доступная глава в сезоне: {chapter} ")
     bot.register_next_step_handler(message, confirm_chapter, chapter)
 
@@ -185,17 +177,16 @@ def confirm_chapter(message, chapter):
         bot.register_next_step_handler(message, confirm_chapter, chapter)
         return
     else:
-        db.update_column(message.chat.id, "chapter", number-1)
-        db.update_column(message.chat.id, "page", 0)
-        update_max_values(message.chat.id)
-        update_max_pages(message.chat.id, url=get_url(message.chat.id))
-        bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
+        db.update_multi_column(message.chat.id, ("chapter", "page"), (number-1, 0))
+        update_url(message.chat.id)
+        update_max_pages(message.chat.id)
+        bot.send_message(message.chat.id, "Номер главы успешно изменён")
 
 
 @bot.message_handler(commands=['page'])
 def set_page(message):
     max_page = db.get_column(message.chat.id, "max_page")
-    bot.send_message(message.chat.id, f"Напиши номер тома (сезона) на который хочешь перейти\n"
+    bot.send_message(message.chat.id, f"Напиши номер страницы на которую хочешь перейти\n"
                                       f"Последний доступная страница в главе: {max_page} ")
     bot.register_next_step_handler(message, confirm_page, max_page)
 
@@ -211,10 +202,10 @@ def confirm_page(message, max_page):
         return
     else:
         db.update_column(message.chat.id, "page", number-1)
-        bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
+        bot.send_message(message.chat.id, "Номер страницы успешно изменён")
 
 
-def get_url(chat_id):
+def update_url(chat_id):
     title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
     links = search.get_groups(f"https://read.yagami.me/series/{title}")
     if not links:
@@ -222,11 +213,12 @@ def get_url(chat_id):
         return
     volume_links = links[volume]
     url = volume_links[list(volume_links.keys())[chapter]]
-    return url
+    db.update_column(chat_id, "page_url", url)
 
 
-def update_max_pages(chat_id, url):
-    if search.is_long_images(url):
+def update_max_pages(chat_id):
+    url, is_long = db.get_multi_column(chat_id, ("page_url", "is_long"))
+    if is_long:
         max_page = search.get_long_max_page(url)
     else:
         max_page = search.get_small_max_page(url)
@@ -236,8 +228,7 @@ def update_max_pages(chat_id, url):
 def update_max_values(chat_id):
     title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
     links = search.get_groups(f"https://read.yagami.me/series/{title}")
-    db.update_column(chat_id, "max_volume", len(links))
-    db.update_column(chat_id, "max_chapter", len(links[volume]))
+    db.update_multi_column(chat_id, ("max_volume", "max_chapter"), (len(links), len(links[volume])))
 
 
 def main():
