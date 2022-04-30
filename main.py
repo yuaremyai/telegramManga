@@ -50,38 +50,27 @@ def get_manga_title(message):
         bot.register_next_step_handler(sent_msg, get_manga_title)
     else:
         formated_result = search.form_result(search_result)
-        msg = formated_msg(formated_result)
-        sent_msg = bot.send_message(message.chat.id, f"Выбери номер нужной манги\n{msg}")
-        bot.register_next_step_handler(sent_msg, choose_title, formated_result)
+        markup = search_inline_keyboard(formated_result)
+        bot.send_message(message.chat.id, f"Выбери нужную мангу\n", reply_markup=markup)
 
 
-def formated_msg(formated_search_result):
-    msg = ""
-    for i, val in enumerate(formated_search_result.keys(), 1):
-        msg += f"/{i} {val}\n"
-    return msg
+def search_inline_keyboard(formated_search_result):
+    markup = telebot.types.InlineKeyboardMarkup()
+    for key in formated_search_result:
+        link = formated_search_result[key].split("/")[-2]
+        item = telebot.types.InlineKeyboardButton(key, callback_data=link)
+        markup.add(item)
+    return markup
 
 
-def choose_title(message, formated_result):
-    number = message.text.replace("/", "")
-    try:
-        number = int(number)
-        if number > len(formated_result) or number < 1:
-            raise ValueError
-    except ValueError:
-        bot.send_message(message.chat.id, "Кажеться ты ввёл не число или оно за пределами списка. Попробуй ещё")
-        bot.register_next_step_handler(message, choose_title, formated_result)
-        return
-    title = list(formated_result.values())[number-1].split("/")[-2]
-    update_title(message.chat.id, title)
-    bot.send_message(message.chat.id, "Отлично! Чтобы начать читать используй /read")
+@bot.callback_query_handler(func=lambda call: True)
+def callback_query(call):
+    update_title(call.message.chat.id, call.data)
+    bot.send_message(call.message.chat.id, "Отлично! Чтобы начать читать используй /read")
 
 
 def update_title(chat_id, title):
-    db.update_column(chat_id, "title", title)
-    db.update_column(chat_id, "volume", 0)
-    db.update_column(chat_id, "chapter", 0)
-    db.update_column(chat_id, "page", 0)
+    db.update_multi_column(chat_id, ("title", "volume", "chapter", "page"), (title, 0, 0, 0))
     url = get_url(chat_id)
     update_max_values(chat_id)
     update_max_pages(chat_id, url)
@@ -112,9 +101,7 @@ def get_next_page(message):
         bot.send_message(message.chat.id, "Поздравляю! Ты дочитал до конца\n"
                          "Если хочешь почитатать что-то ещё используй /search")
         return
-    db.update_column(message.chat.id, "page", page)
-    db.update_column(message.chat.id, "chapter", chapter)
-    db.update_column(message.chat.id, "volume", volume)
+    db.update_multi_column(message.chat.id, ("page", "chapter", "volume"), (page, chapter, volume))
     bot.send_message(message.chat.id, "Загружаю страницу")
     url = get_url(message.chat.id)
     update_max_values(message.chat.id)
@@ -159,9 +146,7 @@ def confirm_volume(message, vol):
         bot.register_next_step_handler(message, confirm_volume, vol)
         return
     else:
-        db.update_column(message.chat.id, "volume", number-1)
-        db.update_column(message.chat.id, "chapter", 0)
-        db.update_column(message.chat.id, "page", 0)
+        db.update_multi_column(message.chat.id, ("page", "chapter", "volume"), (0, 0, number-1))
         update_max_values(message.chat.id)
         update_max_pages(message.chat.id, url=get_url(message.chat.id))
         bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
@@ -170,7 +155,7 @@ def confirm_volume(message, vol):
 @bot.message_handler(commands=["chapter"])
 def set_chapter(message):
     chapter = db.get_column(message.chat.id, "max_chapter")
-    bot.send_message(message.chat.id, f"Напиши номер тома (сезона) на который хочешь перейти\n"
+    bot.send_message(message.chat.id, f"Напиши номер главы на которую хочешь перейти\n"
                                       f"Последний доступная глава в сезоне: {chapter} ")
     bot.register_next_step_handler(message, confirm_chapter, chapter)
 
@@ -185,8 +170,7 @@ def confirm_chapter(message, chapter):
         bot.register_next_step_handler(message, confirm_chapter, chapter)
         return
     else:
-        db.update_column(message.chat.id, "chapter", number-1)
-        db.update_column(message.chat.id, "page", 0)
+        db.update_column(message.chat.id, ("chapter", "page"), (number-1, 0))
         update_max_values(message.chat.id)
         update_max_pages(message.chat.id, url=get_url(message.chat.id))
         bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
@@ -195,7 +179,7 @@ def confirm_chapter(message, chapter):
 @bot.message_handler(commands=['page'])
 def set_page(message):
     max_page = db.get_column(message.chat.id, "max_page")
-    bot.send_message(message.chat.id, f"Напиши номер тома (сезона) на который хочешь перейти\n"
+    bot.send_message(message.chat.id, f"Напиши номер страницы на которую хочешь перейти\n"
                                       f"Последний доступная страница в главе: {max_page} ")
     bot.register_next_step_handler(message, confirm_page, max_page)
 
