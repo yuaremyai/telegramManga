@@ -71,19 +71,22 @@ def callback_query(call):
 
 def update_title(chat_id, title):
     db.update_multi_column(chat_id, ("title", "volume", "chapter", "page"), (title, 0, 0, 0))
-    url = get_url(chat_id)
+    update_url(chat_id)
     update_max_values(chat_id)
-    update_max_pages(chat_id, url)
+    update_max_pages(chat_id)
+    url = db.get_column(chat_id, "page_url")
+    is_long = search.is_long_images(url)
+    db.update_column(chat_id, "is_long", is_long)
 
 
 @bot.message_handler(commands=['read'])
 def get_current_page(message):
-    url = get_url(message.chat.id)
     bot.send_message(message.chat.id, "Загружаю страницу")
-    if search.is_long_images(url):
-        read_long_image(message.chat.id, url)
+    is_long = db.get_column(message.chat.id, "is_long")
+    if is_long:
+        read_long_image(message.chat.id)
     else:
-        read_short_image(message.chat.id, url)
+        read_short_image(message.chat.id)
 
 
 @bot.message_handler(commands=['next'])
@@ -92,35 +95,38 @@ def get_next_page(message):
     max_page, chapter, max_chapter, volume, max_volume = db.get_multi_column(message.chat.id, ("max_page", "chapter",
                                                                                    "max_chapter", "volume", "max_volume"))
     if page + 1 > max_page:
-        page = 0
-        chapter += 1
+        db.update_multi_column(message.chat.id, ("page", "chapter"), (0, chapter+1))
+        update_url(message.chat.id)
+        update_max_values(message.chat.id)
+        update_max_pages(message.chat.id)
+    else:
+        db.update_column(message.chat.id, "page", page)
     if chapter + 1 > max_chapter:
-        chapter = 0
-        volume += 1
+        db.update_multi_column(message.chat.id, ("chapter", "volume"), (0, volume+1))
+        update_url(message.chat.id)
+        update_max_values(message.chat.id)
+        update_max_pages(message.chat.id)
     if volume + 1 > max_volume:
         bot.send_message(message.chat.id, "Поздравляю! Ты дочитал до конца\n"
                          "Если хочешь почитатать что-то ещё используй /search")
         return
-    db.update_multi_column(message.chat.id, ("page", "chapter", "volume"), (page, chapter, volume))
     bot.send_message(message.chat.id, "Загружаю страницу")
-    url = get_url(message.chat.id)
-    update_max_values(message.chat.id)
-    update_max_pages(message.chat.id, url)
-    if search.is_long_images(url):
-        read_long_image(message.chat.id, url)
+    is_long = db.get_column(message.chat.id, "is_long")
+    if is_long:
+        read_long_image(message.chat.id)
     else:
-        read_short_image(message.chat.id, url)
+        read_short_image(message.chat.id)
 
 
-def read_short_image(chat_id, url):
-    page = db.get_column(chat_id, "page")
+def read_short_image(chat_id):
+    page, url = db.get_multi_column(chat_id, ("page", "page_url"))
     img_url = search.get_small_image_link(f"{url}page/{page+1}")
     image = image_processing.get_image(img_url)
     bot.send_photo(chat_id, photo=image)
 
 
-def read_long_image(chat_id, url):
-    page = db.get_column(chat_id, "page")
+def read_long_image(chat_id):
+    page, url = db.get_multi_column(chat_id, ("page", "page_url"))
     img_url = search.get_long_image_links(url)
     image = image_processing.get_image(img_url[page])
     parts = image_processing.cut_image(image)
@@ -147,9 +153,10 @@ def confirm_volume(message, vol):
         return
     else:
         db.update_multi_column(message.chat.id, ("page", "chapter", "volume"), (0, 0, number-1))
+        update_url(message.chat.id)
         update_max_values(message.chat.id)
-        update_max_pages(message.chat.id, url=get_url(message.chat.id))
-        bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
+        update_max_pages(message.chat.id)
+        bot.send_message(message.chat.id, "Номер главы успешно изменён")
 
 
 @bot.message_handler(commands=["chapter"])
@@ -170,10 +177,10 @@ def confirm_chapter(message, chapter):
         bot.register_next_step_handler(message, confirm_chapter, chapter)
         return
     else:
-        db.update_column(message.chat.id, ("chapter", "page"), (number-1, 0))
-        update_max_values(message.chat.id)
-        update_max_pages(message.chat.id, url=get_url(message.chat.id))
-        bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
+        db.update_multi_column(message.chat.id, ("chapter", "page"), (number-1, 0))
+        update_url(message.chat.id)
+        update_max_pages(message.chat.id)
+        bot.send_message(message.chat.id, "Номер главы успешно изменён")
 
 
 @bot.message_handler(commands=['page'])
@@ -195,10 +202,10 @@ def confirm_page(message, max_page):
         return
     else:
         db.update_column(message.chat.id, "page", number-1)
-        bot.send_message(message.chat.id, "Напиши /read чтобы получить продолжить читать")
+        bot.send_message(message.chat.id, "Номер страницы успешно изменён")
 
 
-def get_url(chat_id):
+def update_url(chat_id):
     title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
     links = search.get_groups(f"https://read.yagami.me/series/{title}")
     if not links:
@@ -206,11 +213,12 @@ def get_url(chat_id):
         return
     volume_links = links[volume]
     url = volume_links[list(volume_links.keys())[chapter]]
-    return url
+    db.update_column(chat_id, "page_url", url)
 
 
-def update_max_pages(chat_id, url):
-    if search.is_long_images(url):
+def update_max_pages(chat_id):
+    url, is_long = db.get_multi_column(chat_id, ("page_url", "is_long"))
+    if is_long:
         max_page = search.get_long_max_page(url)
     else:
         max_page = search.get_small_max_page(url)
@@ -220,8 +228,7 @@ def update_max_pages(chat_id, url):
 def update_max_values(chat_id):
     title, volume, chapter = db.get_multi_column(chat_id, ("title", "volume", "chapter"))
     links = search.get_groups(f"https://read.yagami.me/series/{title}")
-    db.update_column(chat_id, "max_volume", len(links))
-    db.update_column(chat_id, "max_chapter", len(links[volume]))
+    db.update_multi_column(chat_id, ("max_volume", "max_chapter"), (len(links), len(links[volume])))
 
 
 def main():

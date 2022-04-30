@@ -27,9 +27,9 @@ class Search:
     def form_result(self, search_result):
         manga_links = {}
         for result in search_result:
-            manga_link = result.find("a").get("href")
-            manga_title = result.find("a").get("title")
-            manga_links[manga_title] = manga_link
+            link = result.find("a").get("href")
+            title = result.find("a").get("title")
+            manga_links[title] = link
         return manga_links
 
     def get_groups(self, url):
