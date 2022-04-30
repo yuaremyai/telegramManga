@@ -65,6 +65,7 @@ def search_inline_keyboard(formated_search_result):
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
+    bot.send_message(call.message.chat.id, "Обрабатываю...")
     update_title(call.message.chat.id, call.data)
     bot.send_message(call.message.chat.id, "Отлично! Чтобы начать читать используй /read")
 
@@ -72,11 +73,11 @@ def callback_query(call):
 def update_title(chat_id, title):
     db.update_multi_column(chat_id, ("title", "volume", "chapter", "page"), (title, 0, 0, 0))
     update_url(chat_id)
-    update_max_values(chat_id)
-    update_max_pages(chat_id)
     url = db.get_column(chat_id, "page_url")
     is_long = search.is_long_images(url)
     db.update_column(chat_id, "is_long", is_long)
+    update_max_values(chat_id)
+    update_max_pages(chat_id)
 
 
 @bot.message_handler(commands=['read'])
@@ -94,22 +95,26 @@ def get_next_page(message):
     page = db.get_column(message.chat.id, "page") + 1  # Increment page
     max_page, chapter, max_chapter, volume, max_volume = db.get_multi_column(message.chat.id, ("max_page", "chapter",
                                                                                    "max_chapter", "volume", "max_volume"))
+    changes = False
     if page + 1 > max_page:
-        db.update_multi_column(message.chat.id, ("page", "chapter"), (0, chapter+1))
-        update_url(message.chat.id)
-        update_max_values(message.chat.id)
-        update_max_pages(message.chat.id)
+        page = 0
+        chapter += 1
+        changes = True
     else:
         db.update_column(message.chat.id, "page", page)
     if chapter + 1 > max_chapter:
-        db.update_multi_column(message.chat.id, ("chapter", "volume"), (0, volume+1))
-        update_url(message.chat.id)
-        update_max_values(message.chat.id)
-        update_max_pages(message.chat.id)
+        volume += 1
+        chapter = 0
+        changes = True
     if volume + 1 > max_volume:
         bot.send_message(message.chat.id, "Поздравляю! Ты дочитал до конца\n"
                          "Если хочешь почитатать что-то ещё используй /search")
         return
+    if changes:
+        db.update_multi_column(message.chat.id, ("page", "chapter", "volume"), (page, chapter, volume))
+        update_url(message.chat.id)
+        update_max_values(message.chat.id)
+        update_max_pages(message.chat.id)
     bot.send_message(message.chat.id, "Загружаю страницу")
     is_long = db.get_column(message.chat.id, "is_long")
     if is_long:
